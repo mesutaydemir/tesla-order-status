@@ -9,6 +9,31 @@ import urllib.parse
 
 from tesla_stores import TeslaStore
 
+def _extract_tckn(details: dict) -> str:
+    # Extract Turkey national ID (TCKN) from multiple possible locations in the order details structure.
+    try_paths = [
+        ['tasks','deliveryDetails','regData','regDetails','privateVatId'],
+        ['tasks','registration','regData','regDetails','privateVatId'],
+        ['tasks','deliveryDetails','orderContact','vat','privateVatId'],
+        ['tasks','registration','orderContact','vat','privateVatId'],
+        ['orderContact','vat','privateVatId'],
+        ['regData','regDetails','privateVatId'],
+        ['privateVatId'],
+    ]
+    for path in try_paths:
+        node = details
+        ok = True
+        for key in path:
+            if isinstance(node, dict) and key in node:
+                node = node[key]
+            else:
+                ok = False
+                break
+        if ok and isinstance(node, (str, int)):
+            return str(node)
+    return 'N/A'
+
+
 # Define constants
 CLIENT_ID = 'ownerapi'
 REDIRECT_URI = 'https://auth.tesla.com/void/callback'
@@ -215,7 +240,10 @@ for detailed_order in detailed_new_orders:
     order_details = detailed_order['details']
     scheduling = order_details.get('tasks', {}).get('scheduling', {})
     order_info = order_details.get('tasks', {}).get('registration', {}).get('orderDetails', {})
+    delivery_data = order_details.get('tasks', {}).get('deliveryDetails', {}).get('regData', {}).get('deliveryAppointment', {})
+    final_payment = order_details.get('tasks', {}).get('finalPayment', {})
     final_payment_data = order_details.get('tasks', {}).get('finalPayment', {}).get('data', {})
+    vehicle_info = order_details.get('tasks', {}).get('insurance', {})
 
     print(f"\n{'-'*45}")
     print(f"{'ORDER INFORMATION':^45}")
@@ -226,7 +254,23 @@ for detailed_order in detailed_new_orders:
     print(f"{color_text('- Status:', '94')} {order['orderStatus']}")
     print(f"{color_text('- Model:', '94')} {order['modelCode']}")
     print(f"{color_text('- VIN:', '94')} {order.get('vin', 'N/A')}")
-    
+    print(f"{color_text('- Motor No:', '94')} {vehicle_info.get('teslaMotorNumber', 'N/A')}")
+    print(f"{color_text('- Ödenen:', '94')} {order_info.get('orderAmount', 'N/A')}")
+    print(f"{color_text('- Plaka:', '94')} {order_info.get('licensePlateNumber', 'N/A')}")
+    print(f"{color_text('- Fiyat Kabul Edildi mi:', '94')} {vehicle_info.get('isPriceAccepted', 'N/A')}")
+    print(f"{color_text('- Teslimata Hazır:', '94')} {order_info.get('readyForDelivery', 'N/A')}")
+    print(f"{color_text('- Kalan Bakiye:', '94')} {final_payment.get('amountDue', 'N/A')}")
+    print(f"{color_text('- Gönderilen Tutar:', '94')} {final_payment.get('amountSent', 'N/A')}")
+    print(f"{color_text('- Nihai Fatura:', '94')} {final_payment_data.get('hasFinalInvoice', 'N/A')}")
+    print(f"{color_text('- Ödeme Ayrıntıları:', '94')} {final_payment_data.get('paymentDetails', 'N/A')}")
+    print(f"{color_text('- Ödeme Kabul Durumu:', '94')} {final_payment_data.get('priceAcceptanceAckStatus', 'N/A')}")
+    print(f"{color_text('- Müşteri Son Ödeme Durumu:', '94')} {final_payment_data.get('customerFinalPaymentStatus', 'N/A')}")
+    print(f"{color_text('- Sigorta Belgesi Sundu mu:', '94')} {final_payment_data.get('hasProofOfInsurance', 'N/A')}")
+    print(f"{color_text('- Araç ID:', '94')} {order_info.get('vehicleId', 'N/A')}")
+
+    print(f"\n{color_text('Personal Details:', '94')}")
+    print(f"{color_text('- İptal Başlangıç Tarihi:', '94')} {order_info.get('orderCancelInitiateDate', 'N/A')}")
+
     print(f"\n{color_text('Reservation Details:', '94')}")
     print(f"{color_text('- Reservation Date:', '94')} {order_info.get('reservationDate', 'N/A')}")
     print(f"{color_text('- Order Booked Date:', '94')} {order_info.get('orderBookedDate', 'N/A')}")
@@ -235,10 +279,10 @@ for detailed_order in detailed_new_orders:
     print(f"{color_text('- Vehicle Odometer:', '94')} {order_info.get('vehicleOdometer', 'N/A')} {order_info.get('vehicleOdometerType', 'N/A')}")
 
     print(f"\n{color_text('Delivery Information:', '94')}")
-    print(f"{color_text('- Routing Location:', '94')} {order_info.get('vehicleRoutingLocation', 'N/A')} ({TeslaStore(order_info.get('vehicleRoutingLocation', 0)).label})")
+    print(f"{color_text('- Son Güncelleyen Kullanıcı:', '94')} {delivery_data.get('lastModifiedUser', 'N/A')}")
+    print(f"{color_text('- Son Güncelleme Tarihi:', '94')} {delivery_data.get('lastUpdateDateTime', 'N/A')}")
     print(f"{color_text('- Delivery Window:', '94')} {scheduling.get('deliveryWindowDisplay', 'N/A')}")
+    print(f"{color_text('- Delivery Appointment Date:', '94')} {scheduling.get('deliveryAppointmentDate', 'N/A')}")
     print(f"{color_text('- ETA to Delivery Center:', '94')} {final_payment_data.get('etaToDeliveryCenter', 'N/A')}")
     print(f"{color_text('- Delivery Appointment:', '94')} {scheduling.get('apptDateTimeAddressStr', 'N/A')}")
-
     print(f"{'-'*45}\n")
-
