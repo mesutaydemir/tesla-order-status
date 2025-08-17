@@ -33,6 +33,40 @@ def _extract_tckn(details: dict) -> str:
             return str(node)
     return 'N/A'
 
+def _extract_motor_number(details: dict) -> str:
+    """
+    Extract first available motor partNumber from:
+    tasks.finalPayment.data.vehicleParts.motorInfo
+
+    Handles both:
+      - list: [{"partCode": "...", "partNumber": "..."}]
+      - dict with numeric keys: {"0": {...}, "1": {...}}
+    """
+    tasks = details.get('tasks', {})
+    fp_data = tasks.get('finalPayment', {}).get('data', {})
+    vehicle_parts = fp_data.get('vehicleParts', fp_data.get('vehcleParts', {}))  # tolerate old misspelling
+    motor_info = vehicle_parts.get('motorInfo', [])
+
+    # Case 1: list
+    if isinstance(motor_info, list):
+        for item in motor_info:
+            if isinstance(item, dict) and item.get('partNumber'):
+                return item['partNumber']
+        return 'N/A'
+
+    # Case 2: dict with numeric keys (rare)
+    if isinstance(motor_info, dict):
+        # direct "0" first, else first numeric key
+        candidate = motor_info.get('0')
+        if candidate is None:
+            for k in sorted(motor_info.keys()):
+                if str(k).isdigit():
+                    candidate = motor_info[k]
+                    break
+        if isinstance(candidate, dict) and candidate.get('partNumber'):
+            return candidate['partNumber']
+
+    return 'N/A'
 
 # Define constants
 CLIENT_ID = 'ownerapi'
@@ -55,7 +89,6 @@ def generate_code_verifier_and_challenge():
         b'=').decode('utf-8')
     return code_verifier, code_challenge
 
-
 def get_auth_code():
     auth_params = {
         'client_id': CLIENT_ID,
@@ -74,7 +107,6 @@ def get_auth_code():
     parsed_url = urllib.parse.urlparse(redirected_url)
     return urllib.parse.parse_qs(parsed_url.query).get('code')[0]
 
-
 def exchange_code_for_tokens(auth_code):
     token_data = {
         'grant_type': 'authorization_code',
@@ -87,22 +119,18 @@ def exchange_code_for_tokens(auth_code):
     response.raise_for_status()
     return response.json()
 
-
 def save_tokens_to_file(tokens):
     with open(TOKEN_FILE, 'w') as f:
         json.dump(tokens, f)
     print(color_text(f"> Tokens saved to '{TOKEN_FILE}'", '94'))
 
-
 def load_tokens_from_file():
     with open(TOKEN_FILE, 'r') as f:
         return json.load(f)
 
-
 def is_token_valid(access_token):
     jwt_decoded = json.loads(base64.b64decode(access_token.split('.')[1] + '==').decode('utf-8'))
     return jwt_decoded['exp'] > time.time()
-
 
 def refresh_tokens(refresh_token):
     token_data = {
@@ -114,14 +142,12 @@ def refresh_tokens(refresh_token):
     response.raise_for_status()
     return response.json()
 
-
 def retrieve_orders(access_token):
     headers = {'Authorization': f'Bearer {access_token}'}
     api_url = 'https://owner-api.teslamotors.com/api/1/users/orders'
     response = requests.get(api_url, headers=headers)
     response.raise_for_status()
     return response.json()['response']
-
 
 def get_order_details(order_id, access_token):
     headers = {'Authorization': f'Bearer {access_token}'}
@@ -130,19 +156,16 @@ def get_order_details(order_id, access_token):
     response.raise_for_status()
     return response.json()
 
-
 def save_orders_to_file(orders):
     with open(ORDERS_FILE, 'w') as f:
         json.dump(orders, f)
     print(color_text(f"\n> Orders saved to '{ORDERS_FILE}'", '94'))
-
 
 def load_orders_from_file():
     if os.path.exists(ORDERS_FILE):
         with open(ORDERS_FILE, 'r') as f:
             return json.load(f)
     return None
-
 
 def compare_dicts(old_dict, new_dict, path=''):
     differences = []
@@ -154,13 +177,10 @@ def compare_dicts(old_dict, new_dict, path=''):
         elif old_dict[key] != new_dict[key]:
             differences.append(color_text(f"- {path + key}: {old_dict[key]}", '91'))
             differences.append(color_text(f"+ {path + key}: {new_dict[key]}", '92'))
-
     for key in new_dict:
         if key not in old_dict:
             differences.append(color_text(f"+ Added key '{path + key}': {new_dict[key]}", '92'))
-
     return differences
-
 
 def compare_orders(old_orders, new_orders):
     differences = []
@@ -172,7 +192,6 @@ def compare_orders(old_orders, new_orders):
     for i in range(len(old_orders), len(new_orders)):
         differences.append(color_text(f"+ Added order {i}", '92'))
     return differences
-
 
 # Main script logic
 print(color_text("\n> Start retrieving the information. Please be patient...\n", '94'))
@@ -189,7 +208,6 @@ if os.path.exists(TOKEN_FILE):
             print(color_text("> Access token is not valid. Refreshing tokens...", '94'))
             token_response = refresh_tokens(refresh_token)
             access_token = token_response['access_token']
-            # refresh access token in file
             token_file['access_token'] = access_token
             save_tokens_to_file(token_file)
 
@@ -229,9 +247,7 @@ if old_orders:
         save_orders_to_file(detailed_new_orders)
     else:
         print(color_text("No differences found.", '90'))
-    
 else:
-    # ask user if they want to save the new orders to a file for comparison next time
     if input(color_text("Would you like to save the order information to a file for future comparison? (y/n): ", '93')).lower() == 'y':
         save_orders_to_file(detailed_new_orders)
 
@@ -244,6 +260,7 @@ for detailed_order in detailed_new_orders:
     final_payment = order_details.get('tasks', {}).get('finalPayment', {})
     final_payment_data = order_details.get('tasks', {}).get('finalPayment', {}).get('data', {})
     vehicle_info = order_details.get('tasks', {}).get('insurance', {})
+    motor_number = _extract_motor_number(order_details)
 
     print(f"\n{'-'*45}")
     print(f"{'ORDER INFORMATION':^45}")
@@ -254,7 +271,7 @@ for detailed_order in detailed_new_orders:
     print(f"{color_text('- Status:', '94')} {order['orderStatus']}")
     print(f"{color_text('- Model:', '94')} {order['modelCode']}")
     print(f"{color_text('- VIN:', '94')} {order.get('vin', 'N/A')}")
-    print(f"{color_text('- Motor No:', '94')} {vehicle_info.get('teslaMotorNumber', 'N/A')}")
+    print(f"{color_text('- Motor No:', '94')} {motor_number}")
     print(f"{color_text('- Ödenen:', '94')} {order_info.get('orderAmount', 'N/A')}")
     print(f"{color_text('- Plaka:', '94')} {order_info.get('licensePlateNumber', 'N/A')}")
     print(f"{color_text('- Fiyat Kabul Edildi mi:', '94')} {vehicle_info.get('isPriceAccepted', 'N/A')}")
@@ -265,11 +282,9 @@ for detailed_order in detailed_new_orders:
     print(f"{color_text('- Ödeme Ayrıntıları:', '94')} {final_payment_data.get('paymentDetails', 'N/A')}")
     print(f"{color_text('- Ödeme Kabul Durumu:', '94')} {final_payment_data.get('priceAcceptanceAckStatus', 'N/A')}")
     print(f"{color_text('- Müşteri Son Ödeme Durumu:', '94')} {final_payment_data.get('customerFinalPaymentStatus', 'N/A')}")
-    print(f"{color_text('- Sigorta Belgesi Sundu mu:', '94')} {final_payment_data.get('hasProofOfInsurance', 'N/A')}")
+    print(f"{color_text('- Sigorta Belgesi Sundu mu:', '94')} {vehicle_info.get('status', 'N/A')}")
+    print(f"{color_text('- Sigorta Poliçe No:', '94')} {vehicle_info.get('insurancePolicyNumber', 'N/A')}")
     print(f"{color_text('- Araç ID:', '94')} {order_info.get('vehicleId', 'N/A')}")
-
-    print(f"\n{color_text('Personal Details:', '94')}")
-    print(f"{color_text('- İptal Başlangıç Tarihi:', '94')} {order_info.get('orderCancelInitiateDate', 'N/A')}")
 
     print(f"\n{color_text('Reservation Details:', '94')}")
     print(f"{color_text('- Reservation Date:', '94')} {order_info.get('reservationDate', 'N/A')}")
